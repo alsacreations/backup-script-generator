@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Générateur de script rclone backup</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header>
+  <div class="header-tag">rclone • bash • backup</div>
+  <h1>Générateur de script de backup</h1>
+  <div class="subtitle">// configure → preview → copie ou télécharge</div>
+</header>
+
+<div class="main">
+  <!-- FORM PANEL -->
+  <div class="form-panel">
+
+    <!-- Remote -->
+    <div class="section">
+      <div class="section-title">Destination S3</div>
+      <label>Remote rclone + bucket + chemin</label>
+      <input type="text" id="s3remote" value="s3backup:backup-servername/backups" placeholder="remote:bucket/path" oninput="gen()">
+      <label>Dossier temporaire local</label>
+      <input type="text" id="tmpdir" value="/tmp/backups" placeholder="/tmp/backups" oninput="gen()">
+    </div>
+
+    <!-- rclone binary -->
+    <div class="section">
+      <div class="section-title">Chemin vers rclone</div>
+      <label>Chemin vers l'exécutable (vide = détection auto via PATH)</label>
+      <input type="text" id="rclonepath" value="/home/debian/bin/rclone" placeholder="laisser vide pour auto-détection" oninput="gen()">
+    </div>
+
+    <!-- Sources -->
+    <div class="section">
+      <div class="section-title">Sources à sauvegarder</div>
+      <div id="backup-list"></div>
+      <button class="btn-add" onclick="addEntry()">+ Ajouter un dossier source</button>
+    </div>
+
+    <!-- Options -->
+    <div class="section">
+      <div class="section-title">Options</div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Compression (tar.gz)</div>
+          <div class="toggle-desc">Compresse chaque source avant l'envoi</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="opt-compress" checked onchange="gen()">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Dossier daté en destination</div>
+          <div class="toggle-desc">Ajoute YYYY-MM-DD_HH-MM-SS au chemin S3</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="opt-date" checked onchange="gen()">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Nettoyage auto fichiers temporaires</div>
+          <div class="toggle-desc">Supprime les archives locales après upload</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="opt-cleanup" checked onchange="gen()">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Trap EXIT (nettoyage sur crash)</div>
+          <div class="toggle-desc">Nettoie le répertoire temporaire même en cas d'erreur</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="opt-trap" checked onchange="gen()">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <br>
+      <label>Mode d'écrasement (--no-check-dest)</label>
+      <select id="opt-overwrite" onchange="gen()">
+        <option value="nocheck">Toujours écraser (--no-check-dest)</option>
+        <option value="skip">Ne pas écraser si existant (--ignore-existing)</option>
+        <option value="update">Écraser si plus récent (--update)</option>
+        <option value="default">Laisser rclone décider (défaut)</option>
+      </select>
+
+      <div id="compress-opts">
+        <label>Exclusions (tar)</label>
+        <input type="text" id="opt-excludes" value="*.log,cache/*,node_modules" placeholder="*.log,cache/*,node_modules" oninput="gen()">
+      </div>
+    </div>
+
+    <!-- Script name -->
+    <div class="section">
+      <div class="section-title">Identifiant du script</div>
+      <label>Nom affiché dans les logs</label>
+      <input type="text" id="script-name" value="S3RCLONE" oninput="gen()">
+      <label>Nom de fichier (sans .sh)</label>
+      <input type="text" id="file-name" value="backup" oninput="()=>{}">
+    </div>
+
+  </div><!-- /form-panel -->
+
+  <!-- OUTPUT PANEL -->
+  <div class="output-panel">
+    <div class="output-toolbar" style="position:relative;">
+      <div class="terminal-dots">
+        <div class="dot dot-red"></div>
+        <div class="dot dot-yellow"></div>
+        <div class="dot dot-green"></div>
+      </div>
+      <div class="terminal-title">backup.sh — generated</div>
+      <div class="toolbar-actions">
+        <button class="btn-copy" id="btn-copy" onclick="copyScript()">⎘ Copier</button>
+        <button class="btn-dl" onclick="downloadScript()">↓ Télécharger .sh</button>
+      </div>
+    </div>
+
+    <div class="terminal-body">
+      <code id="script-output"></code>
+    </div>
+
+    <!-- CRON SECTION -->
+    <div class="cron-section">
+      <div class="cron-title">Syntaxe cron</div>
+      <div class="cron-fields">
+        <div class="cron-field">
+          <label>Fréquence</label>
+          <select id="cron-freq" onchange="updateCron()">
+            <option value="hourly">Toutes les heures</option>
+            <option value="daily" selected>Tous les jours</option>
+            <option value="weekly">Toutes les semaines</option>
+            <option value="monthly">Tous les mois</option>
+            <option value="custom">Personnalisé…</option>
+          </select>
+        </div>
+        <div class="cron-field" id="cron-hour-wrap">
+          <label>Heure</label>
+          <select id="cron-hour" onchange="updateCron()">
+            <!-- filled by JS -->
+          </select>
+        </div>
+        <div class="cron-field" id="cron-min-wrap">
+          <label>Minute</label>
+          <select id="cron-min" onchange="updateCron()">
+            <!-- filled by JS -->
+          </select>
+        </div>
+        <div class="cron-field" id="cron-day-wrap" style="display:none">
+          <label>Jour de la semaine</label>
+          <select id="cron-day" onchange="updateCron()">
+            <option value="1">Lundi</option>
+            <option value="2">Mardi</option>
+            <option value="3">Mercredi</option>
+            <option value="4">Jeudi</option>
+            <option value="5">Vendredi</option>
+            <option value="6">Samedi</option>
+            <option value="0">Dimanche</option>
+          </select>
+        </div>
+        <div class="cron-field" id="cron-mday-wrap" style="display:none">
+          <label>Jour du mois</label>
+          <select id="cron-mday" onchange="updateCron()">
+            <!-- filled by JS -->
+          </select>
+        </div>
+        <div class="cron-field" id="cron-custom-wrap" style="display:none">
+          <label>Expression cron</label>
+          <input type="text" id="cron-custom" value="*/5 * * * *" oninput="updateCron()">
+        </div>
+      </div>
+      <div class="cron-result">
+        <div>
+          <div class="cron-line" id="cron-line">0 3 * * * /home/debian/backup.sh >> /var/log/backup.log 2>&amp;1</div>
+          <div class="cron-desc" id="cron-desc">Tous les jours à 03:00</div>
+        </div>
+        <button class="btn-copy-cron" id="btn-cron-copy" onclick="copyCron()">copier</button>
+      </div>
+      <div class="cron-instructions">
+        <p>Comment déployer et planifier :</p>
+        <ol>
+          <li>Copiez le script dans un répertoire accessible, par exemple <code>/home/debian/backup.sh</code></li>
+          <li>Rendez-le exécutable : <code>chmod +x /home/debian/backup.sh</code></li>
+          <li>Ouvrez l'éditeur cron avec <code>crontab -e</code></li>
+          <li>Collez la ligne ci-dessus en fin de fichier, puis sauvegardez</li>
+        </ol>
+      </div>
+    </div>
+  </div><!-- /output-panel -->
+</div><!-- /main -->
+
+<div class="tips-section">
+  <div class="tips-title">Bonnes pratiques</div>
+  <div class="tips-grid">
+    <div class="tip-card">
+      <div class="tip-card-title">🕵 Vérifier les sauvegardes</div>
+      <div class="tip-card-body">Consultez régulièrement les logs et vérifiez que les fichiers sont bien présents dans le stockage distant après chaque exécution.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title">🧪 Tester une restauration</div>
+      <div class="tip-card-body">Une sauvegarde non testée est une sauvegarde dont on ignore si elle fonctionne. Simulez une restauration complète périodiquement.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title">🌱 Écoconception</div>
+      <div class="tip-card-body">Évitez de sauvegarder des données inutiles (caches, logs, node_modules…). Mettez en place une rotation pour ne pas stocker indéfiniment.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title">🔒 Sécuriser les accès</div>
+      <div class="tip-card-body">Protégez le fichier de config rclone, utilisez des permissions S3 minimales (écriture seule si possible), et chiffrez les données sensibles.</div>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
